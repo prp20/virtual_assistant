@@ -14,10 +14,15 @@ from gtts import gTTS
 import requests, json
 import playsound
 from decouple import config
+import pytz
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 API_KEY = config("WEATHER_API_KEY")
 retry=0
+MONTHS=["Jaunary", "february", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "Saturday", "sunday"]
+DAY_EXTENSIONS = ["rd", "th", "st", "nd"]
+
 def listen():
     r = sr.Recognizer()
     with sr.Microphone() as source:
@@ -36,7 +41,8 @@ def listen():
     except Exception as e:
         respond("I'm sorry. I could'n get you. Can you please repeat?")
         print(f"Exception: {e}")
-    return data
+    
+    return data.lower()
 
 def respond(audioString):
     tts = gTTS(text=audioString, lang='en')
@@ -48,7 +54,7 @@ def digital_assistant(data):
     print("In digital assistant \n")
     if "how are you" in data:
         listening = True
-        respond("I am well")
+        respond("Thank you. I feel wonderful and well. Hope you feel the same.")
 
     elif "time" in data:
         listening = True
@@ -58,6 +64,15 @@ def digital_assistant(data):
         report = weather_report()
         listening = True
         respond(report)
+
+    elif "event" in data or "tasks" in data or "plan" in data:
+        SERVICE = authenticate_google()
+        date = get_date(data)
+        if date:
+            get_events(date, SERVICE)
+        else:
+            respond("Please Try Again")
+        listening = True
 
     elif "thank you" in data:
         respond("Thank you. Wake me if you need any help. Have a good day. Byeeeee")
@@ -89,15 +104,48 @@ def weather_report():
         report= f"Sorry, but I couldn't find the weather report for {city}."
     return(report)
 
+def get_date(text):
+    today = datetime.date.today()
 
+    if text.count("today") > 0:
+        return today
 
-# time.sleep(2)
-# respond("Hi Prasad, how can I help you? Please tell me")
-# listening = True
-# while listening == True and retry < 3:
-#     data = listen()
-#     listening = digital_assistant(data)
-# digital_assistant("thank you")
+    day = -1
+    day_of_the_week = -1
+    month = -1
+    year = today.year
+
+    for word in text.split():
+        if word in MONTHS:
+            month = MONTHS.index(word) + 1
+        elif word in DAYS:
+            day_of_the_week = DAYS.index(word)
+        elif word.isdigit():
+            day = int(word)
+        else:
+            for ext in DAY_EXTENSIONS:
+                found = word.find(ext)
+                if found > 0:
+                    try:
+                        day = int(word[:found])
+                    except:
+                        pass
+    if month < today.month and month != -1:
+        year = year + 1
+
+    if day < today.day and month == -1  and day != -1:
+        month = month +1
+
+    if month == -1 and day == -1 and day_of_the_week != -1:
+        current_day_of_the_week = today.weekday()
+        dif = day_of_the_week - current_day_of_the_week
+        if dif < 0:
+            dif += 7
+            if text.count("next") >= 1:
+                dif += 7
+
+        return today + datetime.timedelta(dif)
+    return datetime.date(month=month, day=day, year=year)
 
 
 def authenticate_google():
@@ -119,23 +167,40 @@ def authenticate_google():
     service = build('calendar', 'v3', credentials=creds)
     return service
 
-def get_events(n, service):
+def get_events(day, service):
     # Call the Calendar API
-    now = datetime.datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
-    print(f'Getting the upcoming {n}events')
-    events_result = service.events().list(calendarId='primary', timeMin=now,
-                                            maxResults=n, singleEvents=True,
-                                            orderBy='startTime').execute()
+    date = datetime.datetime.combine(day, datetime.datetime.min.time())
+    end = datetime.datetime.combine(day, datetime.datetime.max.time())
+    utc = pytz.UTC
+    date = date.astimezone(utc)
+    end = end.astimezone(utc)
+    events_result = service.events().list(calendarId='primary', timeMin=date.isoformat(), timeMax=end.isoformat(),
+                                        singleEvents=True,
+                                        orderBy='startTime').execute()
     events = events_result.get('items', [])
 
     if not events:
-        print('No upcoming events found.')
-        return
+        respond('No upcoming events found.')
+    else:
+        respond(f'You have a total of {len(events)} events on this day.')
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            print(start, event['summary'])
+            start_time = str(start.split("T")[1].split("-")[0])
+            if int(start_time.split(":")[0]) < 12:
+                start_time = start_time + "am"
+            else:
+                start_time = str(int(start_time.split(":")[0])-12) + start_time.split(":")[1]
+                start_time = start_time + "pm"
 
-    # Prints the start and name of the next 10 events
-    for event in events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        print(start, event['summary'])
+            respond(event["summary"] + " at " + start_time)
 
-service = authenticate_google()
-get_events(2,service)
+
+# time.sleep(2)
+respond("Hi Prasad, how can I help you? Please tell me")
+listening = True
+while listening == True and retry < 3:
+    data = listen()
+    listening = digital_assistant(data)
+if listening:
+    digital_assistant("thank you")
