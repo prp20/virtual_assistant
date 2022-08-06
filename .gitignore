@@ -127,3 +127,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+#mp3
+speech.mp3
+
+#credential files
+creds.json
+gitkey.txt
+token.json
+
